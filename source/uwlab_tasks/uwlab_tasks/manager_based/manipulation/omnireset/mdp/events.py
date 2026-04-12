@@ -36,7 +36,7 @@ from ..assembly_keypoints import Offset
 from .success_monitor_cfg import SuccessMonitorCfg
 
 
-class grasp_sampling_event(ManagerTermBase):
+class _GraspSamplingEventTerm(ManagerTermBase):
     """EventTerm class for grasp sampling and positioning gripper."""
 
     def __init__(self, cfg: EventTermCfg, env: ManagerBasedEnv):
@@ -455,6 +455,60 @@ class grasp_sampling_event(ManagerTermBase):
         # 4. Set joint targets to default positions to prevent drift
         gripper_asset.set_joint_position_target(default_joint_pos, env_ids=env_ids)
         gripper_asset.set_joint_velocity_target(zero_joint_vel, env_ids=env_ids)
+
+
+_GRASP_SAMPLING_EVENT_SINGLETON_KEY = "_uwlab_grasp_sampling_event_term"
+
+
+def grasp_sampling_event(
+    env: ManagerBasedEnv,
+    env_ids: torch.Tensor,
+    object_cfg: SceneEntityCfg,
+    gripper_cfg: SceneEntityCfg,
+    num_candidates: int,
+    num_standoff_samples: int,
+    num_orientations: int,
+    lateral_sigma: float,
+    visualize_grasps: bool = False,
+    visualization_scale: float = 0.01,
+) -> None:
+    """Reset-mode entrypoint: lazily construct the class term before first reset.
+
+    Isaac Lab may call reset events before timeline PLAY has replaced class ``func`` entries
+    with instances; calling the class like a function breaks. This wrapper keeps the public
+    name ``grasp_sampling_event`` while ensuring a single instantiated term per environment.
+    """
+    term = env.extras.get(_GRASP_SAMPLING_EVENT_SINGLETON_KEY)
+    if term is None:
+        cfg = EventTermCfg(
+            func=_GraspSamplingEventTerm,
+            mode="reset",
+            params={
+                "object_cfg": object_cfg,
+                "gripper_cfg": gripper_cfg,
+                "num_candidates": num_candidates,
+                "num_standoff_samples": num_standoff_samples,
+                "num_orientations": num_orientations,
+                "lateral_sigma": lateral_sigma,
+                "visualize_grasps": visualize_grasps,
+                "visualization_scale": visualization_scale,
+            },
+        )
+        term = _GraspSamplingEventTerm(cfg, env)
+        env.extras[_GRASP_SAMPLING_EVENT_SINGLETON_KEY] = term
+
+    term(
+        env,
+        env_ids,
+        object_cfg,
+        gripper_cfg,
+        num_candidates,
+        num_standoff_samples,
+        num_orientations,
+        lateral_sigma,
+        visualize_grasps,
+        visualization_scale,
+    )
 
 
 class global_physics_control_event(ManagerTermBase):
@@ -928,68 +982,53 @@ class pose_logging_event(ManagerTermBase):
         }
 
 
-class assembly_sampling_event(ManagerTermBase):
-    """EventTerm class for spawning insertive object at assembled offset position."""
+def assembly_sampling_event(
+    env: ManagerBasedEnv,
+    env_ids: torch.Tensor,
+    receptive_object_cfg: SceneEntityCfg,
+    insertive_object_cfg: SceneEntityCfg,
+) -> None:
+    """Spawn insertive object at assembled offset position.
 
-    def __init__(self, cfg: EventTermCfg, env: ManagerBasedEnv):
-        super().__init__(cfg, env)
+    Plain function (not :class:`ManagerTermBase`) so reset-mode events work when ``env.reset()``
+    runs before the timeline PLAY callback has instantiated class-based terms.
+    """
+    receptive_object = env.scene[receptive_object_cfg.name]
+    insertive_object = env.scene[insertive_object_cfg.name]
 
-        self.receptive_object_cfg = cfg.params.get("receptive_object_cfg")
-        self.receptive_object = env.scene[self.receptive_object_cfg.name]
-        self.insertive_object_cfg = cfg.params.get("insertive_object_cfg")
-        self.insertive_object = env.scene[self.insertive_object_cfg.name]
+    insertive_metadata = utils.read_metadata_from_usd_directory(insertive_object.cfg.spawn.usd_path)
+    receptive_metadata = utils.read_metadata_from_usd_directory(receptive_object.cfg.spawn.usd_path)
 
-        insertive_metadata = utils.read_metadata_from_usd_directory(self.insertive_object.cfg.spawn.usd_path)
-        receptive_metadata = utils.read_metadata_from_usd_directory(self.receptive_object.cfg.spawn.usd_path)
+    insertive_assembled_offset = Offset(
+        pos=insertive_metadata.get("assembled_offset").get("pos"),
+        quat=insertive_metadata.get("assembled_offset").get("quat"),
+    )
+    receptive_assembled_offset = Offset(
+        pos=receptive_metadata.get("assembled_offset").get("pos"),
+        quat=receptive_metadata.get("assembled_offset").get("quat"),
+    )
 
-        self.insertive_assembled_offset = Offset(
-            pos=insertive_metadata.get("assembled_offset").get("pos"),
-            quat=insertive_metadata.get("assembled_offset").get("quat"),
-        )
-        self.receptive_assembled_offset = Offset(
-            pos=receptive_metadata.get("assembled_offset").get("pos"),
-            quat=receptive_metadata.get("assembled_offset").get("quat"),
-        )
+    receptive_pos = receptive_object.data.root_pos_w[env_ids]
+    receptive_quat = receptive_object.data.root_quat_w[env_ids]
 
-    def __call__(
-        self,
-        env: ManagerBasedEnv,
-        env_ids: torch.Tensor,
-        receptive_object_cfg: SceneEntityCfg,
-        insertive_object_cfg: SceneEntityCfg,
-    ) -> None:
-        """Spawn insertive object at assembled offset position."""
+    target_pos, target_quat = receptive_assembled_offset.combine(receptive_pos, receptive_quat)
 
-        # Get receptive object poses
-        receptive_pos = self.receptive_object.data.root_pos_w[env_ids]
-        receptive_quat = self.receptive_object.data.root_quat_w[env_ids]
+    offset_quat = (
+        torch.tensor(insertive_assembled_offset.quat).to(target_quat.device).repeat(target_quat.shape[0], 1)
+    )
+    insertive_quat = math_utils.quat_mul(target_quat, math_utils.quat_inv(offset_quat))
 
-        # Apply receptive assembled offset to get target position
-        target_pos, target_quat = self.receptive_assembled_offset.combine(receptive_pos, receptive_quat)
+    offset_pos = torch.tensor(insertive_assembled_offset.pos).to(target_pos.device).repeat(target_pos.shape[0], 1)
+    offset_pos_world = math_utils.quat_apply(target_quat, offset_pos)
+    insertive_pos = target_pos - offset_pos_world
 
-        # Handle position and orientation separately
-        # Offset quat is in insertive object's frame: target_quat = insertive_quat * offset_quat
-        offset_quat = (
-            torch.tensor(self.insertive_assembled_offset.quat).to(target_quat.device).repeat(target_quat.shape[0], 1)
-        )
-        insertive_quat = math_utils.quat_mul(target_quat, math_utils.quat_inv(offset_quat))
-
-        # Position offset is in insertive object's frame, but rotated by target_quat to keep it independent of offset_quat
-        # This ensures changing offset_quat doesn't change the position offset direction
-        offset_pos = (
-            torch.tensor(self.insertive_assembled_offset.pos).to(target_pos.device).repeat(target_pos.shape[0], 1)
-        )
-        offset_pos_world = math_utils.quat_apply(target_quat, offset_pos)
-        insertive_pos = target_pos - offset_pos_world
-
-        # Set insertive object pose
-        self.insertive_object.write_root_state_to_sim(
-            root_state=torch.cat(
-                [insertive_pos, insertive_quat, torch.zeros((len(env_ids), 6), device=env.device)],  # Zero velocities
-                dim=-1,
-            ),
-            env_ids=env_ids,
-        )
+    insertive_object.write_root_state_to_sim(
+        root_state=torch.cat(
+            [insertive_pos, insertive_quat, torch.zeros((len(env_ids), 6), device=env.device)],
+            dim=-1,
+        ),
+        env_ids=env_ids,
+    )
 
 
 class MultiResetManager(ManagerTermBase):
