@@ -22,6 +22,15 @@ parser = argparse.ArgumentParser(description="Train an RL agent with skrl.")
 parser.add_argument("--video", action="store_true", default=False, help="Record videos during training.")
 parser.add_argument("--video_length", type=int, default=200, help="Length of the recorded video (in steps).")
 parser.add_argument("--video_interval", type=int, default=2000, help="Interval between video recordings (in steps).")
+parser.add_argument(
+    "--log-reward-terms-every",
+    type=int,
+    default=24,
+    help=(
+        "Print mean total reward and each weighted reward term every N env steps; "
+        "0 disables. Default matches PPO rollouts (24) for roughly one line per policy update."
+    ),
+)
 parser.add_argument("--num_envs", type=int, default=None, help="Number of environments to simulate.")
 parser.add_argument("--task", type=str, default=None, help="Name of the task.")
 parser.add_argument(
@@ -101,6 +110,7 @@ from isaaclab.envs import (
     DirectMARLEnv,
     DirectMARLEnvCfg,
     DirectRLEnvCfg,
+    ManagerBasedRLEnv,
     ManagerBasedRLEnvCfg,
     multi_agent_to_single_agent,
 )
@@ -116,6 +126,40 @@ from uwlab_tasks.utils.hydra import hydra_task_config
 
 # import logger
 logger = logging.getLogger(__name__)
+
+
+class _RewardTermStdoutWrapper(gym.Wrapper):
+    """Print mean reward (total and each weighted term) for debugging."""
+
+    def __init__(self, env: gym.Env, *, every_n: int):
+        super().__init__(env)
+        self.every_n = max(1, int(every_n))
+        self._step_count = 0
+
+    def reset(self, *, seed=None, options=None):
+        self._step_count = 0
+        return self.env.reset(seed=seed, options=options)
+
+    def step(self, action):
+        obs, reward, terminated, truncated, infos = self.env.step(action)
+        self._step_count += 1
+        if self._step_count % self.every_n != 0:
+            return obs, reward, terminated, truncated, infos
+        base = self.unwrapped
+        if not isinstance(base, ManagerBasedRLEnv):
+            return obs, reward, terminated, truncated, infos
+        rm = base.reward_manager
+        names = rm.active_terms
+        if hasattr(reward, "mean"):
+            rmean = float(reward.mean().detach().cpu())
+        else:
+            rmean = float("nan")
+        parts = [f"total_mean={rmean:.6f}"]
+        for i, name in enumerate(names):
+            parts.append(f"{name}={float(rm._step_reward[:, i].mean().detach().cpu()):.6f}")
+        print(f"[reward] env_step={self._step_count} " + " ".join(parts), flush=True)
+        return obs, reward, terminated, truncated, infos
+
 
 # PLACEHOLDER: Extension template (do not remove this comment)
 
@@ -214,6 +258,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         print("[INFO] Recording videos during training.")
         print_dict(video_kwargs, nesting=4)
         env = gym.wrappers.RecordVideo(env, **video_kwargs)
+
+    if args_cli.log_reward_terms_every:
+        print(
+            f"[INFO] Verbose reward logging every {args_cli.log_reward_terms_every} env steps "
+            "(mean across envs: total + weighted terms).",
+            flush=True,
+        )
+        env = _RewardTermStdoutWrapper(env, every_n=args_cli.log_reward_terms_every)
 
     # wrap around environment for skrl
     env = SkrlVecEnvWrapper(env, ml_framework=args_cli.ml_framework)  # same as: `wrap_env(env, wrapper="auto")`

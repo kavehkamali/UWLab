@@ -57,6 +57,16 @@ parser.add_argument(
     help="The RL algorithm used for training the skrl agent.",
 )
 parser.add_argument("--real-time", action="store_true", default=False, help="Run in real-time, if possible.")
+parser.add_argument(
+    "--orbit-camera",
+    action="store_true",
+    help=(
+        "When --video is set, orbit the viewport camera around env_cfg.viewer.lookat each step "
+        "(full 360° over --video_length). Requires a viewer configuration on env_cfg."
+    ),
+)
+parser.add_argument("--orbit-radius", type=float, default=1.65, help="Orbit radius in meters (horizontal).")
+parser.add_argument("--orbit-z-offset", type=float, default=0.48, help="Camera eye height above look-at Z (m).")
 
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
@@ -76,6 +86,7 @@ simulation_app = app_launcher.app
 
 import gymnasium as gym
 import os
+import math
 import random
 import time
 import torch
@@ -208,25 +219,60 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
     print(f"[INFO] Loading model checkpoint from: {resume_path}")
     runner.agent.load(resume_path)
     # set agent to evaluation mode
-    runner.agent.set_running_mode("eval")
+    runner.agent.enable_training_mode(False)
 
     # reset environment
     obs, _ = env.reset()
     timestep = 0
+    step_count = 0
     # simulate environment
     while simulation_app.is_running():
         start_time = time.time()
 
+        if (
+            args_cli.video
+            and getattr(args_cli, "orbit_camera", False)
+            and hasattr(env_cfg, "viewer")
+            and env_cfg.viewer is not None
+        ):
+            lx, ly, lz = (float(x) for x in env_cfg.viewer.lookat)
+            ns = max(1, args_cli.video_length - 1)
+            th = 2.0 * math.pi * (timestep / ns)
+            r = args_cli.orbit_radius
+            zo = args_cli.orbit_z_offset
+            eye = (lx + r * math.cos(th), ly + r * math.sin(th), lz + zo)
+            cur = env
+            for _ in range(16):
+                if hasattr(cur, "sim"):
+                    cur.sim.set_camera_view(eye=eye, target=(lx, ly, lz))
+                    break
+                nxt = getattr(cur, "unwrapped", None)
+                if nxt is not None and nxt is not cur:
+                    cur = nxt
+                    continue
+                nxt = getattr(cur, "env", None)
+                if nxt is not None:
+                    cur = nxt
+                    continue
+                break
+
         # run everything in inference mode
         with torch.inference_mode():
-            # agent stepping
-            outputs = runner.agent.act(obs, timestep=0, timesteps=0)
+            # agent stepping (skrl >= 1.4: act(obs, states, timestep=..., timesteps=...))
+            actions_out, agent_outputs = runner.agent.act(
+                obs,
+                None,
+                timestep=step_count,
+                timesteps=max(args_cli.video_length, 1) if args_cli.video else 10**9,
+            )
             # - multi-agent (deterministic) actions
             if hasattr(env, "possible_agents"):
-                actions = {a: outputs[-1][a].get("mean_actions", outputs[0][a]) for a in env.possible_agents}
+                actions = {
+                    a: agent_outputs[-1][a].get("mean_actions", actions_out[a]) for a in env.possible_agents
+                }
             # - single-agent (deterministic) actions
             else:
-                actions = outputs[-1].get("mean_actions", outputs[0])
+                actions = agent_outputs.get("mean_actions", actions_out)
             # env stepping
             obs, _, _, _, _ = env.step(actions)
         if args_cli.video:
@@ -234,6 +280,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
             # exit the play loop after recording one video
             if timestep == args_cli.video_length:
                 break
+
+        step_count += 1
 
         # time delay for real-time evaluation
         sleep_time = dt - (time.time() - start_time)
