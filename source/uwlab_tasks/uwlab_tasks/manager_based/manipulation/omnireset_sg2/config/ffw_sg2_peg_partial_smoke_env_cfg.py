@@ -7,6 +7,7 @@ from __future__ import annotations
 import isaaclab.sim as sim_utils
 from isaaclab.assets import AssetBaseCfg, RigidObjectCfg
 from isaaclab.envs import ManagerBasedRLEnvCfg, ViewerCfg
+import isaaclab.envs.mdp as mdp
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
@@ -14,7 +15,6 @@ from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 from uwlab_assets import UWLAB_CLOUD_ASSETS_DIR
 
 from uwlab_tasks.manager_based.manipulation.omnireset.config.ur5e_robotiq_2f85.partial_assemblies_cfg import (
-    PartialAssembliesActionsCfg,
     PartialAssembliesEventCfg,
     PartialAssembliesObservationsCfg,
     PartialAssembliesRewardsCfg,
@@ -80,14 +80,26 @@ class FfwSg2PegPartialAssemblySceneCfg(InteractiveSceneCfg):
 
 
 @configclass
+class FfwSg2PegPartialAssemblyActionsCfg:
+    """Joint targets for FFW-SG2 (same pattern as spawn smoke; partial-assembly MDP has no robot actions)."""
+
+    joint_pos = mdp.JointPositionActionCfg(
+        asset_name="robot",
+        joint_names=[".*"],
+        scale=0.05,
+        use_default_offset=True,
+    )
+
+
+@configclass
 class FfwSg2PegPartialAssemblySmokeEnvCfg(ManagerBasedRLEnvCfg):
-    """OmniReset partial-assembly events/rewards with SG2 present (no SG2 actions yet)."""
+    """OmniReset partial-assembly events/rewards with SG2 present and joint-position control."""
 
     scene: FfwSg2PegPartialAssemblySceneCfg = FfwSg2PegPartialAssemblySceneCfg(num_envs=1, env_spacing=2.0)
     events: PartialAssembliesEventCfg = PartialAssembliesEventCfg()
     terminations: PartialAssembliesTerminationCfg = PartialAssembliesTerminationCfg()
     observations: PartialAssembliesObservationsCfg = PartialAssembliesObservationsCfg()
-    actions: PartialAssembliesActionsCfg = PartialAssembliesActionsCfg()
+    actions: FfwSg2PegPartialAssemblyActionsCfg = FfwSg2PegPartialAssemblyActionsCfg()
     rewards: PartialAssembliesRewardsCfg = PartialAssembliesRewardsCfg()
     viewer: ViewerCfg = ViewerCfg(
         eye=(2.0, 0.0, 0.75), origin_type="world", env_index=0, asset_name="receptive_object"
