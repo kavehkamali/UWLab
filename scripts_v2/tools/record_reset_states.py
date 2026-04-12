@@ -90,6 +90,7 @@ def main(env_cfg, agent_cfg) -> None:
             "ObjectAnywhereEEAnywhere",
             "ObjectRestingEEGrasped",
             "ObjectAnywhereEEGrasped",
+            "ObjectPartiallyAssembledEEAnywhere",
             "ObjectPartiallyAssembledEEGrasped",
         ]:
             if candidate in args_cli.task:
