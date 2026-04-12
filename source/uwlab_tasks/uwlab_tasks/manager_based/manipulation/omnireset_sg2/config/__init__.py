@@ -3,6 +3,8 @@
 
 import gymnasium as gym
 
+from . import agents
+
 gym.register(
     id="OmniReset-FFWSG2-SpawnSmoke-v0",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
@@ -13,7 +15,9 @@ gym.register(
 gym.register(
     id="OmniReset-FFWSG2-PegPartialAssemblySmoke-v0",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
-    kwargs={"env_cfg_entry_point": f"{__name__}.ffw_sg2_peg_partial_smoke_env_cfg:FfwSg2PegPartialAssemblySmokeEnvCfg"},
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.ffw_sg2_peg_partial_smoke_env_cfg:FfwSg2PegPartialAssemblySmokeEnvCfg",
+        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_cfg.yaml",
+    },
     disable_env_checker=True,
 )
-

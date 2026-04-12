@@ -8,6 +8,9 @@ import isaaclab.sim as sim_utils
 from isaaclab.assets import AssetBaseCfg, RigidObjectCfg
 from isaaclab.envs import ManagerBasedRLEnvCfg, ViewerCfg
 import isaaclab.envs.mdp as mdp
+from isaaclab.managers import ObservationGroupCfg as ObsGroup
+from isaaclab.managers import ObservationTermCfg as ObsTerm
+from isaaclab.managers import SceneEntityCfg
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
@@ -16,7 +19,6 @@ from uwlab_assets import UWLAB_CLOUD_ASSETS_DIR
 
 from uwlab_tasks.manager_based.manipulation.omnireset.config.ur5e_robotiq_2f85.partial_assemblies_cfg import (
     PartialAssembliesEventCfg,
-    PartialAssembliesObservationsCfg,
     PartialAssembliesRewardsCfg,
     PartialAssembliesTerminationCfg,
 )
@@ -92,22 +94,45 @@ class FfwSg2PegPartialAssemblyActionsCfg:
 
 
 @configclass
+class FfwSg2PegPartialAssemblyObservationsCfg:
+    """Minimal policy observations for SKRL / PPO (robot state + previous action)."""
+
+    @configclass
+    class PolicyCfg(ObsGroup):
+        joint_pos = ObsTerm(func=mdp.joint_pos_rel, params={"asset_cfg": SceneEntityCfg("robot")})
+        joint_vel = ObsTerm(func=mdp.joint_vel_rel, params={"asset_cfg": SceneEntityCfg("robot")})
+        last_action = ObsTerm(func=mdp.last_action)
+
+        def __post_init__(self):
+            self.enable_corruption = False
+            self.concatenate_terms = True
+
+    policy: PolicyCfg = PolicyCfg()
+
+
+@configclass
 class FfwSg2PegPartialAssemblySmokeEnvCfg(ManagerBasedRLEnvCfg):
     """OmniReset partial-assembly events/rewards with SG2 present and joint-position control."""
 
     scene: FfwSg2PegPartialAssemblySceneCfg = FfwSg2PegPartialAssemblySceneCfg(num_envs=1, env_spacing=2.0)
     events: PartialAssembliesEventCfg = PartialAssembliesEventCfg()
     terminations: PartialAssembliesTerminationCfg = PartialAssembliesTerminationCfg()
-    observations: PartialAssembliesObservationsCfg = PartialAssembliesObservationsCfg()
+    observations: FfwSg2PegPartialAssemblyObservationsCfg = FfwSg2PegPartialAssemblyObservationsCfg()
     actions: FfwSg2PegPartialAssemblyActionsCfg = FfwSg2PegPartialAssemblyActionsCfg()
     rewards: PartialAssembliesRewardsCfg = PartialAssembliesRewardsCfg()
     viewer: ViewerCfg = ViewerCfg(
-        eye=(2.0, 0.0, 0.75), origin_type="world", env_index=0, asset_name="receptive_object"
+        eye=(2.0, 0.0, 0.75),
+        lookat=(0.0, 0.0, 0.35),
+        origin_type="world",
+        env_index=0,
+        asset_name="receptive_object",
+        resolution=(960, 540),
     )
 
     def __post_init__(self):
         self.decimation = 1
-        self.episode_length_s = 4.0
+        # Longer than data-collection partial assemblies so PPO sees meaningful rollouts.
+        self.episode_length_s = 10.0
         self.sim.dt = 1 / 120.0
         self.sim.physx.solver_type = 1
         self.sim.physx.max_position_iteration_count = 192
