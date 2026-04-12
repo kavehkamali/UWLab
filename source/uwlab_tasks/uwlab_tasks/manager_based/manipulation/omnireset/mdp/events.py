@@ -593,7 +593,7 @@ class global_physics_control_event(ManagerTermBase):
                 )
 
 
-class reset_end_effector_round_fixed_asset(ManagerTermBase):
+class _ResetEndEffectorRoundFixedAssetTerm(ManagerTermBase):
     def __init__(self, cfg: EventTermCfg, env: ManagerBasedEnv):
         fixed_asset_cfg: SceneEntityCfg = cfg.params.get("fixed_asset_cfg")  # type: ignore
         fixed_asset_offset: Offset = cfg.params.get("fixed_asset_offset")  # type: ignore
@@ -657,7 +657,32 @@ class reset_end_effector_round_fixed_asset(ManagerTermBase):
             )
 
 
-class reset_end_effector_from_grasp_dataset(ManagerTermBase):
+_RESET_EE_ROUND_FIXED_ASSET_KEY = "_uwlab_reset_end_effector_round_fixed_asset_term"
+
+
+def reset_end_effector_round_fixed_asset(
+    env: ManagerBasedEnv,
+    env_ids: torch.Tensor,
+    fixed_asset_cfg: SceneEntityCfg,
+    fixed_asset_offset: Offset,
+    pose_range_b: dict[str, tuple[float, float]],
+    robot_ik_cfg: SceneEntityCfg,
+) -> None:
+    kwargs = {
+        "fixed_asset_cfg": fixed_asset_cfg,
+        "fixed_asset_offset": fixed_asset_offset,
+        "pose_range_b": pose_range_b,
+        "robot_ik_cfg": robot_ik_cfg,
+    }
+    term = env.extras.get(_RESET_EE_ROUND_FIXED_ASSET_KEY)
+    if term is None:
+        cfg = EventTermCfg(func=_ResetEndEffectorRoundFixedAssetTerm, mode="reset", params=dict(kwargs))
+        term = _ResetEndEffectorRoundFixedAssetTerm(cfg, env)
+        env.extras[_RESET_EE_ROUND_FIXED_ASSET_KEY] = term
+    term(env, env_ids, **kwargs)
+
+
+class _ResetEndEffectorFromGraspDatasetTerm(ManagerTermBase):
     """Reset end effector pose using saved grasp dataset from grasp sampling."""
 
     def __init__(self, cfg: EventTermCfg, env: ManagerBasedEnv):
@@ -833,7 +858,34 @@ class reset_end_effector_from_grasp_dataset(ManagerTermBase):
         )
 
 
-class reset_insertive_object_from_partial_assembly_dataset(ManagerTermBase):
+_RESET_EE_FROM_GRASP_DATASET_KEY = "_uwlab_reset_end_effector_from_grasp_dataset_term"
+
+
+def reset_end_effector_from_grasp_dataset(
+    env: ManagerBasedEnv,
+    env_ids: torch.Tensor,
+    dataset_dir: str,
+    fixed_asset_cfg: SceneEntityCfg,
+    robot_ik_cfg: SceneEntityCfg,
+    gripper_cfg: SceneEntityCfg,
+    pose_range_b: dict[str, tuple[float, float]] = dict(),
+) -> None:
+    kwargs = {
+        "dataset_dir": dataset_dir,
+        "fixed_asset_cfg": fixed_asset_cfg,
+        "robot_ik_cfg": robot_ik_cfg,
+        "gripper_cfg": gripper_cfg,
+        "pose_range_b": pose_range_b,
+    }
+    term = env.extras.get(_RESET_EE_FROM_GRASP_DATASET_KEY)
+    if term is None:
+        cfg = EventTermCfg(func=_ResetEndEffectorFromGraspDatasetTerm, mode="reset", params=dict(kwargs))
+        term = _ResetEndEffectorFromGraspDatasetTerm(cfg, env)
+        env.extras[_RESET_EE_FROM_GRASP_DATASET_KEY] = term
+    term(env, env_ids, **kwargs)
+
+
+class _ResetInsertiveObjectFromPartialAssemblyDatasetTerm(ManagerTermBase):
     """EventTerm class for resetting the insertive object from a partial assembly dataset."""
 
     def __init__(self, cfg: EventTermCfg, env: ManagerBasedEnv):
@@ -937,6 +989,35 @@ class reset_insertive_object_from_partial_assembly_dataset(ManagerTermBase):
             ),
             env_ids=env_ids,
         )
+
+
+_RESET_INSERTIVE_FROM_PARTIAL_ASSEMBLY_KEY = "_uwlab_reset_insertive_object_from_partial_assembly_dataset_term"
+
+
+def reset_insertive_object_from_partial_assembly_dataset(
+    env: ManagerBasedEnv,
+    env_ids: torch.Tensor,
+    dataset_dir: str,
+    insertive_object_cfg: SceneEntityCfg,
+    receptive_object_cfg: SceneEntityCfg,
+    pose_range_b: dict[str, tuple[float, float]] = dict(),
+) -> None:
+    kwargs = {
+        "dataset_dir": dataset_dir,
+        "insertive_object_cfg": insertive_object_cfg,
+        "receptive_object_cfg": receptive_object_cfg,
+        "pose_range_b": pose_range_b,
+    }
+    term = env.extras.get(_RESET_INSERTIVE_FROM_PARTIAL_ASSEMBLY_KEY)
+    if term is None:
+        cfg = EventTermCfg(
+            func=_ResetInsertiveObjectFromPartialAssemblyDatasetTerm,
+            mode="reset",
+            params=dict(kwargs),
+        )
+        term = _ResetInsertiveObjectFromPartialAssemblyDatasetTerm(cfg, env)
+        env.extras[_RESET_INSERTIVE_FROM_PARTIAL_ASSEMBLY_KEY] = term
+    term(env, env_ids, **kwargs)
 
 
 class pose_logging_event(ManagerTermBase):
