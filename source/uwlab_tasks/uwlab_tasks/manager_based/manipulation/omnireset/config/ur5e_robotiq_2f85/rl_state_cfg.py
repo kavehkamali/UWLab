@@ -558,9 +558,24 @@ class RewardsCfg:
         },
     )
 
-    dense_success_reward = RewTerm(func=task_mdp.dense_success_reward, weight=0.1, params={"std": 1.0})
+    dense_success_reward = RewTerm(
+        func=task_mdp.dense_success_reward,
+        weight=0.1,
+        params={
+            "std": 1.0,
+            "insertive_asset_cfg": SceneEntityCfg("insertive_object"),
+            "receptive_asset_cfg": SceneEntityCfg("receptive_object"),
+        },
+    )
 
-    success_reward = RewTerm(func=task_mdp.success_reward, weight=1.0)
+    success_reward = RewTerm(
+        func=task_mdp.success_reward,
+        weight=1.0,
+        params={
+            "insertive_asset_cfg": SceneEntityCfg("insertive_object"),
+            "receptive_asset_cfg": SceneEntityCfg("receptive_object"),
+        },
+    )
 
 
 @configclass

@@ -33,6 +33,7 @@ FFW_SG2_CFG = ArticulationCfg(
             solver_velocity_iteration_count=1,
         ),
         activate_contact_sensors=False,
+        copy_from_source=False,
     ),
     init_state=ArticulationCfg.InitialStateCfg(
         joint_pos={

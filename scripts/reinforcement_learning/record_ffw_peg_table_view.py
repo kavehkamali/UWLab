@@ -23,7 +23,7 @@ parser.add_argument("--seed", type=int, default=0)
 parser.add_argument(
     "--no-orbit-camera",
     action="store_true",
-    help="Disable orbital camera motion (default: orbit 360° around the table look-at over the clip).",
+    help="Disable orbital camera motion (default: slow orbit — half the legacy angular rate; π rad over --video_length unless you lengthen the clip).",
 )
 parser.add_argument("--orbit_radius", type=float, default=1.65, help="Horizontal orbit radius (m).")
 parser.add_argument("--orbit_z_offset", type=float, default=0.48, help="Eye height above look-at Z (m).")
@@ -73,7 +73,8 @@ def main(env_cfg, agent_cfg):
     n_steps = max(1, args_cli.video_length - 1)
     for step in range(args_cli.video_length):
         if not args_cli.no_orbit_camera:
-            theta = 2.0 * math.pi * (step / n_steps)
+            # Half the angular speed of the legacy orbit (π rad over the clip; double --video_length for a slow 360°).
+            theta = math.pi * (step / n_steps)
             r = args_cli.orbit_radius
             eye = (
                 lx + r * math.cos(theta),

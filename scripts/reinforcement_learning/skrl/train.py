@@ -19,9 +19,9 @@ from isaaclab.app import AppLauncher
 
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Train an RL agent with skrl.")
-parser.add_argument("--video", action="store_true", default=False, help="Record videos during training.")
+parser.add_argument("--video", action="store_true", default=False, help=("Record short gymnasium videos during training. WARNING: this enables cameras for the whole process (enable_cameras=True) and render_mode=rgb_array, which usually slows training vs headless. For periodic debug clips without slowing the trainer, run training WITHOUT --video and use scripts/reinforcement_learning/skrl/snapshot_checkpoint_video.sh in a separate tmux session."))
 parser.add_argument("--video_length", type=int, default=200, help="Length of the recorded video (in steps).")
-parser.add_argument("--video_interval", type=int, default=2000, help="Interval between video recordings (in steps).")
+parser.add_argument("--video_interval", type=int, default=2000, help="RecordVideo step_trigger interval: one clip starts every N calls to env.step() (post-wrappers). Use a large value (e.g. 500000+) for rare captures.")
 parser.add_argument(
     "--log-reward-terms-every",
     type=int,
@@ -155,8 +155,28 @@ class _RewardTermStdoutWrapper(gym.Wrapper):
         else:
             rmean = float("nan")
         parts = [f"total_mean={rmean:.6f}"]
+        raw_hints = {
+            "wrist_to_peg",
+            "wrist_approach_progress",
+            "both_wrists_to_pin",
+            "both_wrists_approach_progress",
+            "peg_xy_to_hole",
+            "peg_lift",
+            "gripper_near_peg",
+            "dense_success_reward",
+            "collision_free",
+            "wrists_clearance_above_surface",
+        }
         for i, name in enumerate(names):
-            parts.append(f"{name}={float(rm._step_reward[:, i].mean().detach().cpu()):.6f}")
+            wmean = float(rm._step_reward[:, i].mean().detach().cpu())
+            if name in raw_hints:
+                term_cfg = rm.get_term_cfg(name)
+                w = float(term_cfg.weight)
+                raw = (wmean / w) if abs(w) > 1e-12 else float("nan")
+                wstd = float(rm._step_reward[:, i].std().detach().cpu())
+                parts.append(f"{name}={wmean:.5f}±{wstd:.6f}r{raw:.3f}")
+            else:
+                parts.append(f"{name}={wmean:.6f}")
         print(f"[reward] env_step={self._step_count} " + " ".join(parts), flush=True)
         return obs, reward, terminated, truncated, infos
 
@@ -176,7 +196,22 @@ else:
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: dict):
     """Train with skrl agent."""
     # override configurations with non-hydra CLI arguments
-    env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs
+    _num_envs = args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs
+    if args_cli.distributed:
+        _world_size = int(os.environ.get("WORLD_SIZE", "1"))
+        if _world_size > 1:
+            if _num_envs % _world_size != 0:
+                raise ValueError(
+                    "When using --distributed with torchrun, --num-envs must be divisible by WORLD_SIZE. "
+                    f"Got num_envs={_num_envs}, WORLD_SIZE={_world_size}."
+                )
+            _num_envs = _num_envs // _world_size
+        else:
+            logger.warning(
+                "--distributed was set but WORLD_SIZE is 1; per-process num_envs will not be split. "
+                "Launch with torchrun --nproc_per_node=N so WORLD_SIZE matches the GPU count."
+            )
+    env_cfg.scene.num_envs = _num_envs
     env_cfg.sim.device = args_cli.device if args_cli.device is not None else env_cfg.sim.device
 
     # check for invalid combination of CPU device with distributed training

@@ -237,7 +237,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
         ):
             lx, ly, lz = (float(x) for x in env_cfg.viewer.lookat)
             ns = max(1, args_cli.video_length - 1)
-            th = 2.0 * math.pi * (timestep / ns)
+            # Half angular speed vs legacy orbit (π rad over the clip; double --video-length for a slow 360°).
+            th = math.pi * (timestep / ns)
             r = args_cli.orbit_radius
             zo = args_cli.orbit_z_offset
             eye = (lx + r * math.cos(th), ly + r * math.sin(th), lz + zo)
